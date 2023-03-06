@@ -367,12 +367,13 @@ final class AmqpCachedConnectionProvider private (val provider: AmqpConnectionPr
   def withAutomaticRelease(automaticRelease: Boolean): AmqpCachedConnectionProvider =
     copy(automaticRelease = automaticRelease)
 
+  val connection = provider.get
+
   @tailrec
   override def get: Connection = state.get match {
     case Empty =>
       if (state.compareAndSet(Empty, Connecting)) {
         try {
-          val connection = provider.get
           if (!state.compareAndSet(Connecting, Connected(connection, 1)))
             throw new ConcurrentModificationException(
               "Unexpected concurrent modification while creating the connection."
@@ -392,26 +393,33 @@ final class AmqpCachedConnectionProvider private (val provider: AmqpConnectionPr
     case Closing => get
   }
 
-  @tailrec
-  override def release(connection: Connection): Unit = state.get match {
-    case Empty => throw new IllegalStateException("There is no connection to release.")
-    case Connecting => release(connection)
-    case c @ Connected(cachedConnection, clients) =>
-      if (cachedConnection != connection)
-        throw new IllegalArgumentException("Can't release a connection that's not owned by this provider")
 
-      if (clients == 1 || !automaticRelease) {
-        if (state.compareAndSet(c, Closing)) {
-          provider.release(connection)
-          if (!state.compareAndSet(Closing, Empty))
-            throw new ConcurrentModificationException(
-              "Unexpected concurrent modification while closing the connection."
-            )
-        }
-      } else {
-        if (!state.compareAndSet(c, Connected(cachedConnection, clients - 1))) release(connection)
+  override def release(connectionForRelease: Connection): Unit = {
+
+    @tailrec
+    def recursion(connectionForRelease: Connection, provider: AmqpConnectionProvider): Unit = {
+      state.get match {
+        case Empty => throw new IllegalStateException("There is no connection to release.")
+        case Connecting => recursion(connectionForRelease, provider)
+        case c @ Connected(cachedConnection, clients) =>
+          if (cachedConnection != connectionForRelease)
+            throw new IllegalArgumentException("Can't release a connection that's not owned by this provider")
+
+          if (clients == 1 || !automaticRelease) {
+            if (state.compareAndSet(c, Closing)) {
+              provider.release(connectionForRelease)
+              if (!state.compareAndSet(Closing, Empty))
+                throw new ConcurrentModificationException(
+                  "Unexpected concurrent modification while closing the connection."
+                )
+            }
+          } else {
+            if (!state.compareAndSet(c, Connected(cachedConnection, clients - 1))) recursion(connectionForRelease, provider)
+          }
+        case Closing => recursion(connectionForRelease, provider)
       }
-    case Closing => release(connection)
+    }
+    recursion(connectionForRelease, provider)
   }
 
   private def copy(automaticRelease: Boolean): AmqpCachedConnectionProvider =
