@@ -397,10 +397,10 @@ final class AmqpCachedConnectionProvider private (val provider: AmqpConnectionPr
   override def release(connectionForRelease: Connection): Unit = {
 
     @tailrec
-    def recursion(connectionForRelease: Connection, provider: AmqpConnectionProvider): Unit = {
+    def releaseRecursive(connectionForRelease: Connection, provider: AmqpConnectionProvider): Unit = {
       state.get match {
         case Empty => throw new IllegalStateException("There is no connection to release.")
-        case Connecting => recursion(connectionForRelease, provider)
+        case Connecting => releaseRecursive(connectionForRelease, provider)
         case c @ Connected(cachedConnection, clients) =>
           if (cachedConnection != connectionForRelease)
             throw new IllegalArgumentException("Can't release a connection that's not owned by this provider")
@@ -414,12 +414,12 @@ final class AmqpCachedConnectionProvider private (val provider: AmqpConnectionPr
                 )
             }
           } else {
-            if (!state.compareAndSet(c, Connected(cachedConnection, clients - 1))) recursion(connectionForRelease, provider)
+            if (!state.compareAndSet(c, Connected(cachedConnection, clients - 1))) releaseRecursive(connectionForRelease, provider)
           }
-        case Closing => recursion(connectionForRelease, provider)
+        case Closing => releaseRecursive(connectionForRelease, provider)
       }
     }
-    recursion(connectionForRelease, provider)
+    releaseRecursive(connectionForRelease, provider)
   }
 
   private def copy(automaticRelease: Boolean): AmqpCachedConnectionProvider =

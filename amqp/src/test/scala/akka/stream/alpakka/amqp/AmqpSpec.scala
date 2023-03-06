@@ -16,7 +16,7 @@ import scala.concurrent.ExecutionContext
 
 abstract class AmqpSpec extends AnyWordSpec with Matchers with BeforeAndAfterAll with ScalaFutures with LogCapturing {
 
-  implicit val system = ActorSystem(this.getClass.getSimpleName)
+  implicit val system: ActorSystem = ActorSystem(this.getClass.getSimpleName)
   implicit val executionContext: ExecutionContext = ExecutionContexts.parasitic
 
   override protected def afterAll(): Unit =
